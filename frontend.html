@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vision Assistant - Audio Navigation Mode</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        .large-button {
+            min-height: 120px;
+            margin: 20px 0;
+            font-size: 24px;
+            width: 100%;
+        }
+        @media (min-width: 640px) { /* sm breakpoint in Tailwind */
+            .large-button {
+                margin: 10px; /* Reduce margin for grid layout on larger screens */
+            }
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            border: 0;
+        }
+        .result-image {
+            max-width: 100%;
+            height: auto;
+            margin: 1rem 0;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .results-container {
+            background: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+        }
+        .section-heading {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 1rem 0;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        /* Chatbot specific styles */
+        #chatbot-panel {
+            position: fixed;
+            top: 0;
+            right: 0; /* Slide in from the right */
+            height: 100%;
+            width: 300px; /* Adjust width as needed */
+            background-color: white;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.2);
+            z-index: 101; /* Above chatbot icon */
+            transform: translateX(100%); /* Initially hidden off-screen */
+            transition: transform 0.3s ease-in-out; /* Smooth slide-in animation */
+            display: flex;
+            flex-direction: column;
+        }
+        #chatbot-panel.open {
+            transform: translateX(0); /* Slide in to view */
+        }
+        #chat-header {
+            padding: 1rem;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: center;
+            font-weight: bold;
+        }
+        #chat-display {
+            flex-grow: 1;
+            padding: 1rem;
+            overflow-y: auto; /* Scrollable chat area */
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-message {
+            padding: 0.5rem 0.75rem;
+            margin-bottom: 0.5rem;
+            border-radius: 0.5rem;
+            clear: both; /* Prevent floating issues */
+        }
+        .user-message {
+            background-color: #e0f7fa; /* Light blue for user messages */
+            align-self: flex-end; /* Align to the right */
+        }
+        .chatbot-message {
+            background-color: #f0f0f0; /* Light gray for chatbot messages */
+            align-self: flex-start; /* Align to the left */
+        }
+      #chat-input-area {
+            padding: 1rem;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center; /* Vertically align items in input area */
+            /* justify-content: space-between;  Initially, we don't need space-between, items should align to the right */
+        }
+        #chat-input {
+            flex-grow: 1; /* Allow input to take up available space */
+            flex-basis: 0; /*  Input starts with no initial size, and grows */
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 0.25rem;
+            margin-right: 0.5rem;
+            min-width: 0; /* Allow input to shrink below its content size if needed */
+        }
+        #send-button, #voice-input-button {
+            background-color: #007bff; /* Blue send button */
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            margin-left: 0.5rem; /* Space between input and buttons */
+            flex-shrink: 0; /* Prevent buttons from shrinking */
+        }
+        #voice-input-button {
+            background-color: #6c757d; /* Gray microphone button */
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 bg-gradient-to-r from-blue-200 to-purple-200">
+    <script>
+        const processUrl = '{{ ngrok_url }}/process';
+        const chatUrl = '{{ ngrok_url }}/chat';
+    </script>
+    <div id="initial-instructions" class="sr-only" aria-live="polite">
+        Welcome to Nethara. Let me explain the layout of this application.
+        There are 6 icons arranged on your screen.
+        There are 6 large buttons arranged in a 2 by 3 grid on your screen.
+        The first row contains Open Camera and Choose from Device buttons.
+        The second row contains Analyze Photo and Read Results buttons.
+        The third row contains Help and Chat buttons.
+        Single tap any button to hear what it does.
+        Double tap to activate the button.
+        You can tap the Help button anytime to hear these instructions again.
+        In the chat interface, to type a message, use the text input field, or tap the microphone button to speak your message. Tap the send button to send your message.
+    </div>
+<!-- Chatbot Panel (Initially Hidden) -->
+<div id="chatbot-panel">
+    <div id="chat-header">Vision Assistant Chat</div>
+    <div id="chat-display">
+        <!-- Chat messages will be appended here -->
+    </div>
+    <div id="chat-input-area">
+        <input type="text" id="chat-input" placeholder="Type your message..." aria-label="Chat input field">
+        <button id="voice-input-button" data-description="Speak your message to the chat assistant" data-action-description="Voice input started. Speak your message now.">
+            <i class="fas fa-microphone"></i><span class="sr-only">Voice Input</span>
+        </button>
+        <button id="send-button" data-description="Sends your message to the chat assistant" data-action-description="Message sent to chat assistant">Send</button>
+    </div>
+</div>
+  <!-- heading  -->
+<header class="text-center py-6 bg-gradient-to-r from-teal-500 to-blue-600 shadow-lg rounded-b-3xl">
+    <div class="flex items-center justify-center space-x-3">
+        <i class="fas fa-eye text-white text-5xl drop-shadow-md"></i>
+        <h1 class="text-5xl font-extrabold text-white drop-shadow-md">NETHRA</h1>
+    </div>
+    <p class="text-lg text-white  mt-2">Your AI-powered navigation companion</p>
+</header>
+<main class="container mx-auto max-w-3xl">
+    <div id="mainControls" class="grid grid-cols-2 gap-6 sm:gap-4"> <!-- Modified mainControls to use grid -->
+        <button id="openCamera"  class="large-button bg-blue-600 text-white rounded-xl shadow-lg" data-description="Opens your device camera to take a photo" data-action-description="Camera opened. Single tap anywhere to hear button descriptions, double tap to take a photo">
+            <span class="text-3xl mr-4">📸</span> Open Camera
+        </button>
+        <button id="chooseFile" class="large-button bg-green-600 text-white rounded-xl shadow-lg" data-description="Opens your photo gallery to choose an existing photo" data-action-description="Opening photo gallery. Please select a photo from your device">
+            <span class="text-3xl mr-4">📁</span> Choose from Device
+        </button>
+        <button id="analyzePhoto" class="large-button bg-purple-600 text-white rounded-xl shadow-lg" data-description="Analyzes the current photo and describes what's in it" data-action-description="Starting image analysis. Please wait while I process the photo">
+            <span class="text-3xl mr-4">🔍</span> Analyze Photo
+        </button>
+        <button id="readResults" class="large-button bg-indigo-600 text-white rounded-xl shadow-lg" data-description="Reads aloud the description of the analyzed photo" data-action-description="Reading analysis results">
+            <span class="text-3xl mr-4">🔊</span> Read Results
+        </button>
+           <button id="chatbot-button" class="large-button bg-teal-600 text-white rounded-xl shadow-lg" data-description="Opens the text-based chat interface" data-action-description="Chat interface opened. You can type or speak messages to interact with the assistant.">
+            <i class="fas fa-comment-dots text-3xl mr-4"></i> Chat
+        </button>
+        <button id="help" class="large-button bg-gray-600 text-white rounded-xl shadow-lg" data-description="Provides help and instructions for using the app" data-action-description="Here are the instructions for using Vision Assistant">
+            <span class="text-3xl mr-4">❓</span> Help
+        </button>
+        <button id="startRealtime" class="large-button bg-red-600 text-white rounded-xl shadow-lg"
+            data-description="Starts real-time object detection and depth estimation"
+            data-action-description="Starting real-time detection. Camera will open and begin analyzing objects.">
+            <span class="text-3xl mr-4">🎥</span> Real-time Detection
+        </button>
+    </div>
+
+    <input type="file" id="fileInput" accept="image/*" class="hidden">
+
+    <div id="cameraUI" class="hidden relative">
+        <video id="video" class="w-full rounded-lg" playsinline autoplay></video>
+        <canvas id="canvas" class="hidden"></canvas>
+        <div class="fixed bottom-4 left-0 right-0 flex justify-center space-x-4">
+            <button id="capturePhoto"  class="large-button bg-green-600 text-white px-6 py-3 rounded-xl" data-description="Takes a photo using your camera" data-action-description="Photo captured. You can now analyze the image">
+                Take Photo
+            </button>
+            <button id="closeCamera"  class="large-button bg-red-600 text-white px-6 py-3 rounded-xl" data-description="Closes the camera and returns to the main screen" data-action-description="Camera closed. Returning to main menu">
+                Close Camera
+            </button>
+        </div>
+    </div>
+
+    <div id="analysisResults" class="hidden results-container">
+        <h2 class="section-heading">Analysis Results</h2>
+        <div class="mb-8">
+            <h3 class="section-heading">Original Image</h3>
+            <img id="preview" src="" alt="Selected image preview" class="result-image">
+        </div>
+        <div class="mb-8">
+            <h3 class="section-heading">Object Detection</h3>
+            <img id="processedImage" src="" alt="Image with detected objects" class="result-image">
+        </div>
+        <div class="mb-8">
+            <h3 class="section-heading">Depth Map</h3>
+            <img id="depthMap" src="" alt="Depth map visualization" class="result-image">
+        </div>
+        <div class="mb-8">
+            <h3 class="section-heading">Description</h3>
+            <div id="description" class="text-lg whitespace-pre-line"></div>
+        </div>
+    </div>
+
+    <div id="realtimeUI" class="hidden relative">
+        <video id="realtimeVideo" class="w-full rounded-lg" playsinline autoplay></video>
+        <img id="processedStream" class="w-full rounded-lg absolute top-0 left-0" style="display: none;">
+        <div class="fixed bottom-4 left-0 right-0 flex justify-center space-x-4">
+            <button id="stopRealtime" class="large-button bg-red-600 text-white px-6 py-3 rounded-xl"
+                    data-description="Stops real-time detection and closes the camera"
+                    data-action-description="Stopping real-time detection and closing camera">
+                Stop Detection
+            </button>
+        </div>
+    </div>
+</main>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const synth = window.speechSynthesis;
+        let lastTapTime = 0;
+        let isSpeaking = false;
+        let stream = null;
+        let currentImage = null;
+        let tapTimeout = null;
+        let chatPanelOpen = false;
+        const chatDisplay = document.getElementById('chat-display');
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-button');
+        const voiceInputButton = document.getElementById('voice-input-button');
+        const chatbotButton = document.getElementById('chatbot-button'); // NEW Chat Button
+        const chatbotPanel = document.getElementById('chatbot-panel');
+        let storedBase64Image = null;
+        let isAnalyzing = false; // Flag to track analysis state
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const cameraUI = document.getElementById('cameraUI');
+        const mainControls = document.getElementById('mainControls');
+        const fileInput = document.getElementById('fileInput');
+
+        const MAX_WIDTH = 1024; // Maximum width for resized image
+        const MAX_HEIGHT = 768; // Maximum height for resized image
+
+        // --- Speech Recognition Setup ---
+        let recognition;
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+        } else {
+            console.warn("Speech Recognition API is not supported in this browser.");
+            voiceInputButton.disabled = true; // Disable voice input if not supported
+            voiceInputButton.dataset.description = "Voice input not supported in this browser";
+        }
+        let isVoiceListening = false;
+
+        function speak(text, interrupt = false) {
+            return new Promise((resolve, reject) => {
+                if (interrupt) synth.cancel();
+                if (!isSpeaking || interrupt) {
+                    if(synth) {
+                        // --- MODIFIED SPEAK FUNCTION - Text Pre-processing to remove MOST special characters, KEEPING periods and commas ---
+                        let cleanedText = text;
+
+                        cleanedText = cleanedText.replace(/%/g, '');
+                        cleanedText = cleanedText.replace(/\$/g, '');
+                        cleanedText = cleanedText.replace(/#/g, '');
+                        cleanedText = cleanedText.replace(/\*/g, '');
+                        cleanedText = cleanedText.replace(/_/g, '');
+                        cleanedText = cleanedText.replace(/-/g, '');
+                        cleanedText = cleanedText.replace(/\+/g, '');
+                        cleanedText = cleanedText.replace(/=/g, '');
+                        cleanedText = cleanedText.replace(/\(/g, '');
+                        cleanedText = cleanedText.replace(/\)/g, '');
+                        cleanedText = cleanedText.replace(/\[/g, '');
+                        cleanedText = cleanedText.replace(/\]/g, '');
+                        cleanedText = cleanedText.replace(/\{/g, '');
+                        cleanedText = cleanedText.replace(/\}/g, '');
+                        cleanedText = cleanedText.replace(/</g, '');
+                        cleanedText = cleanedText.replace(/>/g, '');
+                        cleanedText = cleanedText.replace(/`/g, '');
+                        cleanedText = cleanedText.replace(/~/g, '');
+                        cleanedText = cleanedText.replace(/!/g, '');
+                        cleanedText = cleanedText.replace(/\?/g, '');
+                        cleanedText = cleanedText.replace(/:/g, '');
+                        cleanedText = cleanedText.replace(/;/g, '');
+                        cleanedText = cleanedText.replace(/&/g, '');
+                        cleanedText = cleanedText.replace(/\|/g, '');
+                        cleanedText = cleanedText.replace(/\\/g, '');
+                        cleanedText = cleanedText.replace(/\//g, '');
+                        cleanedText = cleanedText.replace(/@/g, '');
+                        cleanedText = cleanedText.replace(/\^/g, '');
+                        cleanedText = cleanedText.replace(/"/g, '');
+                        cleanedText = cleanedText.replace(/'/g, '');
+
+                        const utterance = new SpeechSynthesisUtterance(cleanedText);
+                        // --- END MODIFIED SPEAK FUNCTION ---
+                        utterance.onstart = () => { isSpeaking = true; console.log('Speech started: ', cleanedText) };
+                        utterance.onend = () => { isSpeaking = false; console.log('Speech ended'); resolve(); }; // Resolve on end
+                        utterance.onerror = (err) => { isSpeaking = false; console.error('Speech error', err); reject(err); }; // Reject on error
+                        synth.speak(utterance);
+                    } else {
+                        console.error("Speech Synthesis not available");
+                        reject("Speech Synthesis not available"); // Reject if synth is not available
+                    }
+                } else {
+                    resolve(); // Resolve immediately if not speaking or interrupt is false (to continue execution)
+                }
+            });
+        }
+
+
+        async function initCamera() {
+            try {
+                if (stream) stream.getTracks().forEach(track => track.stop());
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+                video.srcObject = stream;
+                cameraUI.classList.remove('hidden');
+                mainControls.classList.add('hidden');
+                speak('Camera opened. Double tap anywhere on the screen to take a photo.');
+            } catch (err) {
+                speak('Unable to access camera. Please check permissions or use file upload instead.');
+                console.error('Error:', err);
+            }
+        }
+
+        function closeCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            cameraUI.classList.add('hidden');
+            mainControls.classList.remove('hidden');
+            speak('Camera closed');
+        }
+
+        function resizeCanvas(origCanvas, maxWidth, maxHeight) {
+            let width = origCanvas.width;
+            let height = origCanvas.height;
+
+            if (width > maxWidth) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+            }
+
+            if (height > maxHeight) {
+                width = Math.round((width * maxHeight) / height);
+                height = maxHeight;
+            }
+
+            const resizedCanvas = document.createElement('canvas');
+            resizedCanvas.width = width;
+            resizedCanvas.height = height;
+            const resizedContext = resizedCanvas.getContext('2d');
+            resizedContext.drawImage(origCanvas, 0, 0, width, height);
+            return resizedCanvas;
+        }
+
+
+        function capturePhoto() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const resizedCanvas = resizeCanvas(canvas, MAX_WIDTH, MAX_HEIGHT);
+
+
+            resizedCanvas.toBlob(function(blob) {
+                currentImage = blob;
+                const url = URL.createObjectURL(blob);
+                document.getElementById('preview').src = url;
+                document.getElementById('analysisResults').classList.remove('hidden');
+                closeCamera();
+                speak('Photo captured. Double tap Analyze Photo to process the image.');
+            }, 'image/jpeg', 0.8);
+        }
+
+        async function analyzeImage() {
+            if (isAnalyzing) {
+                speak('Please wait, the image is being processed.');
+                return;
+            }
+
+            if (!currentImage) {
+                speak('No image selected.');
+                return;
+            }
+
+            speak('Analyzing photo. This may take a few moments.');
+            isAnalyzing = true;
+
+            try {
+                const formData = new FormData();
+                formData.append('image', currentImage);
+                formData.append('sensitivity', '0.3');
+
+                const response = await fetch(processUrl, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                isAnalyzing = false;
+
+                if (data.error) {
+                    speak('Sorry, there was an error analyzing the image: ' + data.error);
+                    return;
+                }
+
+                document.getElementById('processedImage').src = 'data:image/jpeg;base64,' + data.processed_image;
+                document.getElementById('depthMap').src = 'data:image/jpeg;base64,' + data.depth_map;
+                document.getElementById('analysisResults').classList.remove('hidden');
+
+                const description = document.getElementById('description').textContent = data.description;
+                setTimeout(() => {
+                    speak(`The image contains: ${description}`, true);
+                }, 500);
+
+                document.getElementById('analysisResults').scrollIntoView({ behavior: 'smooth' });
+                storedBase64Image = data.processed_image;
+
+
+            } catch (error) {
+                isAnalyzing = false;
+                speak('Sorry, there was an error analyzing the image. Please try again.');
+                console.error('Error:', error);
+            }
+        }
+
+        function executeButtonAction(button) {
+            switch(button.id) {
+                case 'openCamera':
+                    speak(button.dataset.actionDescription, true);
+                    initCamera();
+                    break;
+                case 'chooseFile':
+                    speak(button.dataset.actionDescription, true);
+                    fileInput.click();
+                    break;
+                case 'analyzePhoto':
+                    if (isAnalyzing) {
+                        speak('Please wait, the image is being processed.', true);
+                    } else if (!currentImage) {
+                        speak('No image selected.', true);
+                    } else {
+                        speak(button.dataset.actionDescription, true);
+                        analyzeImage();
+                    }
+                    break;
+                case 'readResults':
+                    const description = document.getElementById('description').textContent;
+                    if (!currentImage) speak('No results obtained.', true);
+                    else if (description && description.trim() !== "") {
+                        speak(button.dataset.actionDescription, true);
+                        setTimeout(() => { speak(description, true); }, 500);
+                    } else speak('No results obtained.', true);
+                    break;
+                case 'help':
+                    speak(button.dataset.actionDescription, true);
+                    speak(document.getElementById('initial-instructions').textContent, true);
+                    break;
+                case 'capturePhoto':
+                    speak(button.dataset.actionDescription, true);
+                    capturePhoto();
+                    break;
+                case 'closeCamera':
+                    speak(button.dataset.actionDescription, true);
+                    closeCamera();
+                    break;
+                case 'chatbot-button':
+                    speak(button.dataset.actionDescription, true);
+                    toggleChatbotPanel();
+                    break;
+                case 'send-button':
+                    speak(button.dataset.actionDescription, true);
+                    sendChatMessage();
+                    break;
+                case 'voice-input-button':
+                    if (recognition) {
+                        speak(button.dataset.actionDescription, true);
+                        startVoiceInput();
+                    } else {
+                        speak("Voice input is not supported in this browser.", true);
+                    }
+                    break;
+                case 'startRealtime':
+                    speak(button.dataset.actionDescription, true);
+                    startRealtimeDetection();
+                    break;
+                case 'stopRealtime':
+                    speak(button.dataset.actionDescription, true);
+                    stopRealtimeDetection();
+                    break;
+            }
+        }
+
+        function handleTap(element) {
+            const currentTime = new Date().getTime();
+            const timeSinceLastTap = currentTime - lastTapTime;
+
+            if (tapTimeout) clearTimeout(tapTimeout);
+
+            if (timeSinceLastTap < 300) {
+                synth.cancel();
+                executeButtonAction(element);
+                tapTimeout = null;
+            } else {
+                tapTimeout = setTimeout(() => {
+                    if (element.dataset.description) speak(element.dataset.description, true);
+                    tapTimeout = null;
+                }, 300);
+            }
+            lastTapTime = currentTime;
+        }
+
+        fileInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const image = new Image();
+                    image.onload = function() {
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = image.width;
+                        tempCanvas.height = image.height;
+                        const tempContext = tempCanvas.getContext('2d');
+                        tempContext.drawImage(image, 0, 0);
+
+                        const resizedCanvas = resizeCanvas(tempCanvas, MAX_WIDTH, MAX_HEIGHT);
+
+                        resizedCanvas.toBlob(function(blob) {
+                            currentImage = blob;
+                            const url = URL.createObjectURL(blob);
+                            document.getElementById('preview').src = url;
+                            document.getElementById('analysisResults').classList.remove('hidden');
+                            speak('Photo selected. Double tap Analyze Photo to process the image.');
+                        }, 'image/jpeg', 0.8);
+                    };
+                    image.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+
+        document.querySelectorAll('button, #chatbot-button, #send-button, #voice-input-button, #startRealtime, #stopRealtime').forEach(element => {
+            element.addEventListener('touchend', (e) => { e.preventDefault(); handleTap(element); });
+            element.addEventListener('click', (e) => { if (e.pointerType !== 'touch') handleTap(element); });
+            element.addEventListener('touchstart', (e) => { element.style.opacity = '0.7'; });
+            element.addEventListener('touchend', (e) => { element.style.opacity = '1'; });
+            element.addEventListener('touchcancel', (e) => { element.style.opacity = '1'; });
+        });
+
+        // --- Chatbot JavaScript Functions ---
+        function toggleChatbotPanel() {
+            chatbotPanel.classList.toggle('open');
+            chatPanelOpen = !chatPanelOpen;
+            if (chatPanelOpen) speak('Chat interface opened.', true);
+            else speak('Chat interface closed.', true);
+        }
+
+        async function sendChatMessage() {
+            const messageText = chatInput.value.trim();
+            if (messageText !== "") {
+                addUserMessage(messageText);
+                chatInput.value = "";
+
+                try {
+                    const formData = new FormData();
+                    formData.append('message', messageText);
+                    if (storedBase64Image) formData.append('image_b64', storedBase64Image);
+
+                    const response = await fetch(chatUrl, { method: 'POST', body: formData });
+                    const data = await response.json();
+                    if (data.error) addChatbotMessage("Error: " + data.error);
+                    else addChatbotMessage(data.response);
+                } catch (error) {
+                    addChatbotMessage("Error sending message. Please try again.");
+                    console.error("Chat error:", error);
+                }
+            }
+        }
+
+        function addUserMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('chat-message', 'user-message');
+            messageDiv.textContent = message;
+            chatDisplay.appendChild(messageDiv);
+            chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        }
+
+        function addChatbotMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('chat-message', 'chatbot-message');
+            messageDiv.textContent = message;
+            chatDisplay.appendChild(messageDiv);
+            chatDisplay.scrollTop = chatDisplay.scrollHeight;
+            speak(message, true);
+        }
+
+        sendButton.addEventListener('click', (e) => { e.preventDefault(); handleTap(sendButton); });
+        chatInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); sendChatMessage(); } });
+
+
+        async function startVoiceInput() {
+            if (!recognition) {
+                speak("Voice recognition is not available in your browser.", true);
+                return;
+            }
+
+            if (isVoiceListening) {
+                recognition.stop();
+                isVoiceListening = false;
+                voiceInputButton.innerHTML = '<i class="fas fa-microphone"></i><span class="sr-only">Voice Input</span>'; // Reset icon
+                speak("Voice input cancelled.", true);
+                return;
+            }
+
+            voiceInputButton.innerHTML = '<i class="fas fa-microphone-slash"></i><span class="sr-only">Stop Voice Input</span>'; // Change icon to indicate listening
+            try {
+                await speak("Listening", true); // Wait for speak to finish
+                recognition.start(); // Start recognition *after* speaking is done
+                isVoiceListening = true;
+            } catch (error) {
+                console.error("Error during speech or starting recognition:", error);
+                isVoiceListening = false; // Ensure isVoiceListening is reset in case of error
+                voiceInputButton.innerHTML = '<i class="fas fa-microphone"></i><span class="sr-only">Voice Input</span>'; // Reset icon
+                speak("Failed to start voice input. Please check console for details.", true); // Inform user of failure
+                return; // Exit if there's an error starting speech or recognition
+            }
+
+
+            recognition.onresult = function(event) {
+                const transcript = Array.from(event.results)
+                    .map(result => result[0])
+                    .map(result => result.transcript)
+                    .join('');
+                chatInput.value = transcript;
+                isVoiceListening = false;
+                voiceInputButton.innerHTML = '<i class="fas fa-microphone"></i><span class="sr-only">Voice Input</span>'; // Reset icon
+                speak("Voice input processed. You can now send or edit your message.", true);
+            };
+
+            recognition.onerror = function(event) {
+                console.error("Speech recognition error", event.error);
+                isVoiceListening = false;
+                voiceInputButton.innerHTML = '<i class="fas fa-microphone"></i><span class="sr-only">Voice Input</span>'; // Reset icon
+                speak("Error in voice recognition. Please try again.", true);
+            };
+
+            recognition.onend = function() {
+                isVoiceListening = false;
+                if (voiceInputButton.innerHTML !== '<i class="fas fa-microphone"></i><span class="sr-only">Voice Input</span>') {
+                    voiceInputButton.innerHTML = '<i class="fas fa-microphone"></i><span class="sr-only">Voice Input</span>'; // Ensure icon reset if not already done by onresult/onerror
+                }
+            };
+        }
+
+
+        let realtimeStream = null;
+        let isStreaming = false;
+        const realtimeUI = document.getElementById('realtimeUI');
+        const realtimeVideo = document.getElementById('realtimeVideo');
+        const processedStream = document.getElementById('processedStream');
+        let frameInterval = null;
+
+        async function startRealtimeDetection() {
+            try {
+                realtimeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+                realtimeVideo.srcObject = realtimeStream;
+                realtimeUI.classList.remove('hidden');
+                mainControls.classList.add('hidden');
+                processedStream.style.display = 'block';
+
+                await fetch('/start-stream');
+                isStreaming = true;
+                frameInterval = setInterval(sendFrame, 100);
+                processedStream.src = '/video-feed';
+
+                speak('Real-time detection started. I will announce detected objects as they appear.');
+            } catch (err) {
+                speak('Unable to access camera for real-time detection.');
+                console.error('Error:', err);
+            }
+        }
+
+        async function stopRealtimeDetection() {
+            isStreaming = false;
+            clearInterval(frameInterval);
+
+            if (realtimeStream) {
+                realtimeStream.getTracks().forEach(track => track.stop());
+                realtimeStream = null;
+            }
+
+            await fetch('/stop-stream');
+
+            realtimeUI.classList.add('hidden');
+            mainControls.classList.remove('hidden');
+            processedStream.style.display = 'none';
+            processedStream.src = '';
+
+            speak('Real-time detection stopped.');
+        }
+
+        async function sendFrame() {
+            if (!isStreaming || !realtimeVideo.videoWidth) return;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = realtimeVideo.videoWidth;
+            canvas.height = realtimeVideo.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(realtimeVideo, 0, 0);
+
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('frame', blob);
+
+                try {
+                    await fetch('/stream-frame', { method: 'POST', body: formData });
+                } catch (error) {
+                    console.error('Error sending frame:', error);
+                }
+            }, 'image/jpeg', 0.8);
+        }
+
+        setTimeout(() => {
+            speak(document.getElementById('initial-instructions').textContent, true);
+        }, 1000);
+    });
+</script>
+</body>
+</html>
