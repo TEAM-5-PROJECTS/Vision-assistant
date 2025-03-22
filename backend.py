@@ -231,7 +231,7 @@ def qwen_chat_text(user_message, image_base64=None, depth_info_lines=None):
             "HTTP-Referer": OPENROUTER_REFERER_URL,
             "X-Title": OPENROUTER_TITLE,
           },
-          model="google/gemini-2.0-flash-thinking-exp:free",
+          model="qwen/qwen2.5-vl-72b-instruct:free",
           messages=messages
         )
         return completion.choices[0].message.content.strip()
